@@ -1,0 +1,13 @@
+{
+  "name": "mbta-gtfs-influxdb-grafana-transit-location-visualizer",
+  "version": "1.0.0",
+  "description": "## 🚀 Using Python and cron read MBTA Realtime GTFS transit vehicle location data and store in InfluxDB with Grafana dashboards to visualize live maps  🚀",
+  "main": "index.js",
+  "scripts": {
+    "mydeploy": "git add . && git commit -m Build && git push",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
