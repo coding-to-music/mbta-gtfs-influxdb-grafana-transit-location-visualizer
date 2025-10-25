@@ -48,7 +48,7 @@ for vehicle in vehicles:
     route_id = rels['route']['data']['id'] if rels.get('route') and rels['route'].get('data') else 'unknown'
     trip_id = rels['trip']['data']['id'] if rels.get('trip') and rels['trip'].get('data') else 'unknown'
     stop_id = rels['stop']['data']['id'] if rels.get('stop') and rels['stop'].get('data') else 'unknown'
-    direction_id = str(attrs.get('direction_id', ''))  # Ensure string for consistency
+    direction_id = str(attrs.get('direction_id', ''))  # Ensure string
     current_status = attrs.get('current_status', 'unknown')
     
     stop_name = stops.get(stop_id, 'unknown')
@@ -69,8 +69,8 @@ for vehicle in vehicles:
         f"stop_id={stop_id},"
         f"direction_id={direction_id},"
         f"current_status={current_status},"
-        f"stop_name=\"{stop_name.replace('\"', '\\\"')}\","
-        f"headsign=\"{headsign.replace('\"', '\\\"')}\""
+        f"stop_name=\"{stop_name.replace('\"', '\\\"').replace(',', '\\,')}\","
+        f"headsign=\"{headsign.replace('\"', '\\\"').replace(',', '\\,')}\""
     )
     
     # Fields: Only include non-None values
@@ -89,7 +89,7 @@ for vehicle in vehicles:
     # Only create line if there are valid fields
     if fields_list:
         fields = ",".join(fields_list)
-        line = f"mbta_vehicle,{tags} {fields} {updated_at}"
+        line = f"mbta_vehicle,{tags} {fields} {updated_at}"  # Space between tags and fields
         line_protocol_lines.append(line)
     else:
         print(f"Skipping vehicle {vehicle_id}: No valid fields to write")
@@ -100,6 +100,11 @@ if not line_protocol_lines:
     sys.exit(1)
 
 line_protocol = '\n'.join(line_protocol_lines)
+
+# Debug: Print Line Protocol for inspection
+print("Line Protocol (first 5 lines):")
+for line in line_protocol_lines[:5]:
+    print(line)
 
 # 4. Write to InfluxDB Cloud
 write_url = f"{INFLUX_URL}/api/v2/write?org={INFLUX_ORG}&bucket={INFLUX_BUCKET}&precision=s"
