@@ -42,75 +42,89 @@ if not vehicles:
 print(f"✓ Found {len(vehicles)} vehicles")
 
 # 2. Build lookup maps for stops and trips
-stops = {item['id']: item['attributes']['name'] for item in included if item['type'] == 'stop'}
-trips = {item['id']: item['attributes']['headsign'] for item in included if item['type'] == 'trip'}
+stops = {item['id']: item['attributes']['name'] for item in included if item['type'] == 'stop' and 'id' in item}
+trips = {item['id']: item['attributes']['headsign'] for item in included if item['type'] == 'trip' and 'id' in item}
 
 # 3. Transform to InfluxDB Line Protocol
 line_protocol_lines = []
 skipped_vehicles = []
 for vehicle in vehicles:
-    attrs = vehicle.get('attributes', {})
-    # Safely handle missing relationships
-    rels = vehicle.get('relationships') or {}
-    
-    vehicle_id = vehicle.get('id', 'unknown')
-    
-    # Validate relationships
-    route_id = rels.get('route', {}).get('data', {}).get('id', 'unknown')
-    trip_id = rels.get('trip', {}).get('data', {}).get('id', 'unknown')
-    stop_id = rels.get('stop', {}).get('data', {}).get('id', 'unknown')
-    
-    # Skip if critical data is missing
-    if vehicle_id == 'unknown' or (route_id == 'unknown' and trip_id == 'unknown' and stop_id == 'unknown'):
-        skipped_vehicles.append(f"Vehicle {vehicle_id}: Missing critical data (route, trip, or stop)")
-        continue
-    
-    direction_id = str(attrs.get('direction_id', '')) or 'unknown'
-    current_status = attrs.get('current_status', 'unknown')
-    stop_name = stops.get(stop_id, 'unknown')
-    headsign = trips.get(trip_id, 'unknown')
-    
-    # Use updated_at as timestamp (convert to Unix seconds)
-    updated_at_str = attrs.get('updated_at')
-    if updated_at_str:
-        try:
-            updated_at = int(datetime.fromisoformat(updated_at_str.rstrip('Z')).timestamp())
-        except ValueError:
+    try:
+        attrs = vehicle.get('attributes', {})
+        vehicle_id = vehicle.get('id', 'unknown')
+        
+        # Safely handle relationships
+        rels = vehicle.get('relationships') or {}
+        
+        # Validate relationships with nested checks
+        route_id = 'unknown'
+        if isinstance(rels.get('route'), dict) and isinstance(rels['route'].get('data'), dict):
+            route_id = rels['route']['data'].get('id', 'unknown')
+        
+        trip_id = 'unknown'
+        if isinstance(rels.get('trip'), dict) and isinstance(rels['trip'].get('data'), dict):
+            trip_id = rels['trip']['data'].get('id', 'unknown')
+        
+        stop_id = 'unknown'
+        if isinstance(rels.get('stop'), dict) and isinstance(rels['stop'].get('data'), dict):
+            stop_id = rels['stop']['data'].get('id', 'unknown')
+        
+        # Skip if critical data is missing
+        if vehicle_id == 'unknown' or (route_id == 'unknown' and trip_id == 'unknown' and stop_id == 'unknown'):
+            skipped_vehicles.append(f"Vehicle {vehicle_id}: Missing critical data (route={route_id}, trip={trip_id}, stop={stop_id})")
+            continue
+        
+        direction_id = str(attrs.get('direction_id', '')) or 'unknown'
+        current_status = attrs.get('current_status', 'unknown')
+        stop_name = stops.get(stop_id, 'unknown')
+        headsign = trips.get(trip_id, 'unknown')
+        
+        # Use updated_at as timestamp (convert to Unix seconds)
+        updated_at_str = attrs.get('updated_at')
+        if updated_at_str:
+            try:
+                updated_at = int(datetime.fromisoformat(updated_at_str.rstrip('Z')).timestamp())
+            except ValueError as e:
+                skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid timestamp format ({updated_at_str})")
+                continue
+        else:
             updated_at = int(datetime.utcnow().timestamp())
-    else:
-        updated_at = int(datetime.utcnow().timestamp())
+        
+        # Tags (escaped for special characters)
+        tags = (
+            f"id={vehicle_id},"
+            f"route_id={route_id},"
+            f"trip_id={trip_id},"
+            f"stop_id={stop_id},"
+            f"direction_id={direction_id},"
+            f"current_status={current_status},"
+            f"stop_name=\"{stop_name.replace('\"', '\\\"').replace(',', '\\,').replace(' ', '_')}\","
+            f"headsign=\"{headsign.replace('\"', '\\\"').replace(',', '\\,').replace(' ', '_')}\""
+        )
+        
+        # Fields: Only include non-None values
+        fields_list = []
+        for field, value in [
+            ('latitude', attrs.get('latitude')),
+            ('longitude', attrs.get('longitude')),
+            ('bearing', attrs.get('bearing')),
+            ('speed', attrs.get('speed')),
+            ('position_latency', attrs.get('position_latency'))
+        ]:
+            if value is not None:
+                fields_list.append(f"{field}={value}")
+        
+        # Only create line if there are valid fields
+        if fields_list:
+            fields = ",".join(fields_list)
+            line = f"mbta_vehicle,{tags} {fields} {updated_at}"
+            line_protocol_lines.append(line)
+        else:
+            skipped_vehicles.append(f"Vehicle {vehicle_id}: No valid fields to write (latitude={attrs.get('latitude')}, longitude={attrs.get('longitude')})")
     
-    # Tags (escaped for special characters)
-    tags = (
-        f"id={vehicle_id},"
-        f"route_id={route_id},"
-        f"trip_id={trip_id},"
-        f"stop_id={stop_id},"
-        f"direction_id={direction_id},"
-        f"current_status={current_status},"
-        f"stop_name=\"{stop_name.replace('\"', '\\\"').replace(',', '\\,').replace(' ', '_')}\","
-        f"headsign=\"{headsign.replace('\"', '\\\"').replace(',', '\\,').replace(' ', '_')}\""
-    )
-    
-    # Fields: Only include non-None values
-    fields_list = []
-    for field, value in [
-        ('latitude', attrs.get('latitude')),
-        ('longitude', attrs.get('longitude')),
-        ('bearing', attrs.get('bearing')),
-        ('speed', attrs.get('speed')),
-        ('position_latency', attrs.get('position_latency'))
-    ]:
-        if value is not None:
-            fields_list.append(f"{field}={value}")
-    
-    # Only create line if there are valid fields
-    if fields_list:
-        fields = ",".join(fields_list)
-        line = f"mbta_vehicle,{tags} {fields} {updated_at}"
-        line_protocol_lines.append(line)
-    else:
-        skipped_vehicles.append(f"Vehicle {vehicle_id}: No valid fields to write (latitude={attrs.get('latitude')}, longitude={attrs.get('longitude')})")
+    except Exception as e:
+        skipped_vehicles.append(f"Vehicle {vehicle_id}: Error processing vehicle data ({str(e)})")
+        continue
 
 # Log skipped vehicles
 if skipped_vehicles:
