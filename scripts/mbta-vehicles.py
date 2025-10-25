@@ -4,7 +4,7 @@ import sys
 from datetime import datetime
 import os
 
-# Configuration - These will come from environment variables (GitHub Secrets)
+# Configuration - Access secrets via environment variables
 MBTA_API_KEY = os.getenv('MBTA_API_KEY', '')  # Optional
 INFLUX_URL = os.getenv('INFLUX_URL')
 INFLUX_TOKEN = os.getenv('INFLUX_TOKEN')
