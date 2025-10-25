@@ -40,17 +40,25 @@ trips = {item['id']: item['attributes']['headsign'] for item in included if item
 
 # 3. Transform to InfluxDB Line Protocol
 line_protocol_lines = []
+skipped_vehicles = []
 for vehicle in vehicles:
     attrs = vehicle['attributes']
-    rels = vehicle['relationships']
+    rels = vehicle.get('relationships', {})
     
     vehicle_id = vehicle['id']
-    route_id = rels['route']['data']['id'] if rels.get('route') and rels['route'].get('data') else 'unknown'
-    trip_id = rels['trip']['data']['id'] if rels.get('trip') and rels['trip'].get('data') else 'unknown'
-    stop_id = rels['stop']['data']['id'] if rels.get('stop') and rels['stop'].get('data') else 'unknown'
+    
+    # Validate relationships
+    route_id = rels.get('route', {}).get('data', {}).get('id', 'unknown')
+    trip_id = rels.get('trip', {}).get('data', {}).get('id', 'unknown')
+    stop_id = rels.get('stop', {}).get('data', {}).get('id', 'unknown')
+    
+    # Skip if critical relationships are missing
+    if route_id == 'unknown' and trip_id == 'unknown' and stop_id == 'unknown':
+        skipped_vehicles.append(f"Vehicle {vehicle_id}: Missing route, trip, and stop relationships")
+        continue
+    
     direction_id = str(attrs.get('direction_id', ''))  # Ensure string
     current_status = attrs.get('current_status', 'unknown')
-    
     stop_name = stops.get(stop_id, 'unknown')
     headsign = trips.get(trip_id, 'unknown')
     
@@ -92,7 +100,13 @@ for vehicle in vehicles:
         line = f"mbta_vehicle,{tags} {fields} {updated_at}"  # Space between tags and fields
         line_protocol_lines.append(line)
     else:
-        print(f"Skipping vehicle {vehicle_id}: No valid fields to write")
+        skipped_vehicles.append(f"Vehicle {vehicle_id}: No valid fields to write")
+
+# Log skipped vehicles
+if skipped_vehicles:
+    print(f"Skipped {len(skipped_vehicles)} vehicles:")
+    for skip_msg in skipped_vehicles[:5]:  # Limit to 5 for brevity
+        print(skip_msg)
 
 # If no valid lines, exit early
 if not line_protocol_lines:
@@ -101,7 +115,7 @@ if not line_protocol_lines:
 
 line_protocol = '\n'.join(line_protocol_lines)
 
-# Debug: Print Line Protocol for inspection
+# Debug: Print Line Protocol for inspection (first 5 lines)
 print("Line Protocol (first 5 lines):")
 for line in line_protocol_lines[:5]:
     print(line)
