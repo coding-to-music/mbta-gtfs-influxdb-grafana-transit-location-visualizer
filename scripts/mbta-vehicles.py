@@ -48,7 +48,7 @@ for vehicle in vehicles:
     route_id = rels['route']['data']['id'] if rels.get('route') and rels['route'].get('data') else 'unknown'
     trip_id = rels['trip']['data']['id'] if rels.get('trip') and rels['trip'].get('data') else 'unknown'
     stop_id = rels['stop']['data']['id'] if rels.get('stop') and rels['stop'].get('data') else 'unknown'
-    direction_id = attrs.get('direction_id', '')
+    direction_id = str(attrs.get('direction_id', ''))  # Ensure string for consistency
     current_status = attrs.get('current_status', 'unknown')
     
     stop_name = stops.get(stop_id, 'unknown')
@@ -61,7 +61,7 @@ for vehicle in vehicles:
     else:
         updated_at = int(datetime.utcnow().timestamp())
     
-    # Tags (escaped if needed)
+    # Tags (escaped for special characters)
     tags = (
         f"id={vehicle_id},"
         f"route_id={route_id},"
@@ -73,17 +73,31 @@ for vehicle in vehicles:
         f"headsign=\"{headsign.replace('\"', '\\\"')}\""
     )
     
-    # Fields
-    fields = (
-        f"latitude={attrs.get('latitude', 0.0)},"
-        f"longitude={attrs.get('longitude', 0.0)},"
-        f"bearing={attrs.get('bearing', 0)},"
-        f"speed={attrs.get('speed', 0)},"
-        f"position_latency={attrs.get('position_latency', 0)}"
-    )
+    # Fields: Only include non-None values
+    fields_list = []
+    if attrs.get('latitude') is not None:
+        fields_list.append(f"latitude={attrs['latitude']}")
+    if attrs.get('longitude') is not None:
+        fields_list.append(f"longitude={attrs['longitude']}")
+    if attrs.get('bearing') is not None:
+        fields_list.append(f"bearing={attrs['bearing']}")
+    if attrs.get('speed') is not None:
+        fields_list.append(f"speed={attrs['speed']}")
+    if attrs.get('position_latency') is not None:
+        fields_list.append(f"position_latency={attrs['position_latency']}")
     
-    line = f"mbta_vehicle,{tags} {fields} {updated_at}"
-    line_protocol_lines.append(line)
+    # Only create line if there are valid fields
+    if fields_list:
+        fields = ",".join(fields_list)
+        line = f"mbta_vehicle,{tags} {fields} {updated_at}"
+        line_protocol_lines.append(line)
+    else:
+        print(f"Skipping vehicle {vehicle_id}: No valid fields to write")
+
+# If no valid lines, exit early
+if not line_protocol_lines:
+    print("✗ No valid data to write to InfluxDB")
+    sys.exit(1)
 
 line_protocol = '\n'.join(line_protocol_lines)
 
@@ -96,7 +110,7 @@ headers = {
 write_response = requests.post(write_url, headers=headers, data=line_protocol)
 
 if write_response.status_code == 204:
-    print(f"✓ Successfully wrote {len(vehicles)} vehicle locations to InfluxDB")
+    print(f"✓ Successfully wrote {len(line_protocol_lines)} vehicle locations to InfluxDB")
 else:
     print(f"✗ Failed to write to InfluxDB: {write_response.status_code} - {write_response.text}")
     sys.exit(1)
