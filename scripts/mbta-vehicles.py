@@ -1,7 +1,7 @@
 import requests
 import json
 import sys
-import os  # Added to fix NameError
+import os
 from datetime import datetime, timezone
 
 # Configuration - Access secrets via environment variables
@@ -42,7 +42,7 @@ if not vehicles:
 print(f"✓ Found {len(vehicles)} vehicles")
 
 # Initialize run summary
-run_time = int(datetime.now(timezone.UTC).timestamp())
+run_time = int(datetime.now(timezone.utc).timestamp())
 vehicles_attempted = len(vehicles)
 vehicles_passed = 0
 vehicles_failed = 0
@@ -96,7 +96,7 @@ for vehicle in vehicles:
                 vehicles_failed += 1
                 continue
         else:
-            updated_at = int(datetime.now(timezone.UTC).timestamp())
+            updated_at = int(datetime.now(timezone.utc).timestamp())
             skipped_vehicles.append(f"Vehicle {vehicle_id}: Missing updated_at, using current time ({updated_at})")
         
         # Tags (escaped for special characters)
