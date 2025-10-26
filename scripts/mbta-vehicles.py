@@ -1,6 +1,7 @@
 import requests
 import json
 import sys
+import os  # Added to fix NameError
 from datetime import datetime, timezone
 
 # Configuration - Access secrets via environment variables
