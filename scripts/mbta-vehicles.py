@@ -32,13 +32,20 @@ except requests.RequestException as e:
     sys.exit(1)
 
 data = response.json()
-vehicles = data.get('data', DimArray = data.get('included', [])
+vehicles = data.get('data', [])
+included = data.get('included', [])
 
 if not vehicles:
     print("✗ No vehicles found")
     sys.exit(1)
 
 print(f"✓ Found {len(vehicles)} vehicles")
+
+# Initialize run summary
+run_time = int(datetime.utcnow().timestamp())
+vehicles_attempted = len(vehicles)
+vehicles_passed = 0
+vehicles_failed = 0
 
 # 2. Build lookup maps for stops and trips
 stops = {item['id']: item['attributes']['name'] for item in included if item['type'] == 'stop' and 'id' in item}
@@ -71,6 +78,7 @@ for vehicle in vehicles:
         # Skip if critical data is missing
         if vehicle_id == 'NA' and route_id == 'NA' and trip_id == 'NA' and stop_id == 'NA':
             skipped_vehicles.append(f"Vehicle {vehicle_id}: Missing all critical data (route={route_id}, trip={trip_id}, stop={stop_id})")
+            vehicles_failed += 1
             continue
         
         direction_id = str(attrs.get('direction_id', 'NA')) if attrs.get('direction_id') is not None else 'NA'
@@ -85,6 +93,7 @@ for vehicle in vehicles:
                 updated_at = int(datetime.fromisoformat(updated_at_str.rstrip('Z')).timestamp())
             except ValueError as e:
                 skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid timestamp format ({updated_at_str}, error: {str(e)})")
+                vehicles_failed += 1
                 continue
         else:
             updated_at = int(datetime.utcnow().timestamp())
@@ -127,19 +136,19 @@ for vehicle in vehicles:
             fields = ",".join(fields_list)
             line = f"mbta_vehicle,{tags_str} {fields} {updated_at}"
             # Validate Line Protocol format
-            if not fields or not tags_str:
-                skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid Line Protocol (tags={tags_str}, fields={fields})")
-                continue
-            # Debug: Log raw vehicle data if line might be problematic
-            if any(tag in fields for tag in ['id=', 'route_id=', 'current_status=', 'stop_name=', 'headsign=']):
-                skipped_vehicles.append(f"Vehicle {vehicle_id}: Potential tag-field mixup (line={line}, raw_data={json.dumps(vehicle, indent=2)})")
+            if not fields or not tags_str or any(tag.split('=')[0] + '=' in fields for tag in tags):
+                skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid Line Protocol (tags={tags_str}, fields={fields}, raw_data={json.dumps(vehicle, indent=2)})")
+                vehicles_failed += 1
                 continue
             line_protocol_lines.append(line)
+            vehicles_passed += 1
         else:
-            skipped_vehicles.append(f"Vehicle {vehicle_id}: No valid fields to write (latitude={attrs.get('latitude')}, longitude={attrs.get('longitude')}, bearing={attrs.get('bearing')}, speed={attrs.get('speed')}, position_latency={attrs.get('position_latency')})")
+            skipped_vehicles.append(f"Vehicle {vehicle_id}: No valid fields to write (latitude={attrs.get('latitude')}, longitude={attrs.get('longitude')}, bearing={attrs.get('bearing')}, speed={attrs.get('speed')}, position_latency={attrs.get('position_latency')}, raw_data={json.dumps(vehicle, indent=2)})")
+            vehicles_failed += 1
     
     except Exception as e:
         skipped_vehicles.append(f"Vehicle {vehicle_id}: Error processing vehicle data (error={str(e)}, raw_data={json.dumps(vehicle, indent=2)})")
+        vehicles_failed += 1
         continue
 
 # Log skipped vehicles
@@ -148,16 +157,20 @@ if skipped_vehicles:
     for skip_msg in skipped_vehicles[:10]:  # Limit to 10 for brevity
         print(skip_msg)
 
-# If no valid lines, exit early
+# If no valid lines, log run summary and exit
 if not line_protocol_lines:
     print("✗ No valid data to write to InfluxDB")
-    sys.exit(1)
-
-line_protocol = '\n'.join(line_protocol_lines)
+    # Still write run summary
+    summary_line = f"mbta_run_summary vehicles_attempted={vehicles_attempted}i,vehicles_passed={vehicles_passed}i,vehicles_failed={vehicles_failed}i {run_time}"
+    line_protocol = summary_line
+else:
+    # Add run summary to Line Protocol
+    summary_line = f"mbta_run_summary vehicles_attempted={vehicles_attempted}i,vehicles_passed={vehicles_passed}i,vehicles_failed={vehicles_failed}i {run_time}"
+    line_protocol = '\n'.join(line_protocol_lines + [summary_line])
 
 # Debug: Print Line Protocol for inspection (first 10 lines)
 print("Line Protocol (first 10 lines):")
-for line in line_protocol_lines[:10]:
+for line in line_protocol.split('\n')[:10]:
     print(line)
 
 # 4. Write to InfluxDB Cloud
@@ -169,7 +182,7 @@ headers = {
 try:
     write_response = requests.post(write_url, headers=headers, data=line_protocol, timeout=10)
     if write_response.status_code == 204:
-        print(f"✓ Successfully wrote {len(line_protocol_lines)} vehicle locations to InfluxDB")
+        print(f"✓ Successfully wrote {len(line_protocol_lines)} vehicle locations and 1 run summary to InfluxDB")
     else:
         print(f"✗ Failed to write to InfluxDB: {write_response.status_code} - {write_response.text}")
         sys.exit(1)
