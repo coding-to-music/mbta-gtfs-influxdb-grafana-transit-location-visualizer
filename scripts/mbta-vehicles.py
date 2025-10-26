@@ -32,8 +32,7 @@ except requests.RequestException as e:
     sys.exit(1)
 
 data = response.json()
-vehicles = data.get('data', [])
-included = data.get('included', [])
+vehicles = data.get('data', DimArray = data.get('included', [])
 
 if not vehicles:
     print("✗ No vehicles found")
@@ -119,8 +118,8 @@ for vehicle in vehicles:
                     if field in ['latitude', 'longitude', 'bearing', 'speed', 'position_latency']:
                         float(value)  # Validate numeric
                     fields_list.append(f"{field}={value}")
-                except (ValueError, TypeError):
-                    skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid field value for {field} ({value})")
+                except (ValueError, TypeError) as e:
+                    skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid field value for {field} ({value}, error: {str(e)})")
                     continue
         
         # Only create line if there are valid fields
@@ -129,14 +128,18 @@ for vehicle in vehicles:
             line = f"mbta_vehicle,{tags_str} {fields} {updated_at}"
             # Validate Line Protocol format
             if not fields or not tags_str:
-                skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid Line Protocol (empty tags or fields)")
+                skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid Line Protocol (tags={tags_str}, fields={fields})")
+                continue
+            # Debug: Log raw vehicle data if line might be problematic
+            if any(tag in fields for tag in ['id=', 'route_id=', 'current_status=', 'stop_name=', 'headsign=']):
+                skipped_vehicles.append(f"Vehicle {vehicle_id}: Potential tag-field mixup (line={line}, raw_data={json.dumps(vehicle, indent=2)})")
                 continue
             line_protocol_lines.append(line)
         else:
             skipped_vehicles.append(f"Vehicle {vehicle_id}: No valid fields to write (latitude={attrs.get('latitude')}, longitude={attrs.get('longitude')}, bearing={attrs.get('bearing')}, speed={attrs.get('speed')}, position_latency={attrs.get('position_latency')})")
     
     except Exception as e:
-        skipped_vehicles.append(f"Vehicle {vehicle_id}: Error processing vehicle data ({str(e)})")
+        skipped_vehicles.append(f"Vehicle {vehicle_id}: Error processing vehicle data (error={str(e)}, raw_data={json.dumps(vehicle, indent=2)})")
         continue
 
 # Log skipped vehicles
