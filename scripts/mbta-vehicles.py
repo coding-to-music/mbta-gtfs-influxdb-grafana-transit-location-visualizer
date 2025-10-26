@@ -1,8 +1,7 @@
 import requests
 import json
 import sys
-from datetime import datetime
-import os
+from datetime import datetime, timezone
 
 # Configuration - Access secrets via environment variables
 MBTA_API_KEY = os.getenv('MBTA_API_KEY', '')  # Optional
@@ -42,7 +41,7 @@ if not vehicles:
 print(f"✓ Found {len(vehicles)} vehicles")
 
 # Initialize run summary
-run_time = int(datetime.utcnow().timestamp())
+run_time = int(datetime.now(timezone.UTC).timestamp())
 vehicles_attempted = len(vehicles)
 vehicles_passed = 0
 vehicles_failed = 0
@@ -96,7 +95,7 @@ for vehicle in vehicles:
                 vehicles_failed += 1
                 continue
         else:
-            updated_at = int(datetime.utcnow().timestamp())
+            updated_at = int(datetime.now(timezone.UTC).timestamp())
             skipped_vehicles.append(f"Vehicle {vehicle_id}: Missing updated_at, using current time ({updated_at})")
         
         # Tags (escaped for special characters)
@@ -141,8 +140,8 @@ for vehicle in vehicles:
                 skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid Line Protocol (line={line}, tags={tags_str}, fields={fields}, raw_data={json.dumps(vehicle, indent=2)})")
                 vehicles_failed += 1
                 continue
-            # Check for tag-like strings in fields
-            if any(tag.split('=')[0] in fields for tag in tags):
+            # Check for full tag strings in fields to avoid false positives
+            if any(tag in fields for tag in tags):
                 skipped_vehicles.append(f"Vehicle {vehicle_id}: Tag-field mixup detected (line={line}, tags={tags_str}, fields={fields}, raw_data={json.dumps(vehicle, indent=2)})")
                 vehicles_failed += 1
                 continue
