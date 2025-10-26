@@ -136,8 +136,14 @@ for vehicle in vehicles:
             fields = ",".join(fields_list)
             line = f"mbta_vehicle,{tags_str} {fields} {updated_at}"
             # Validate Line Protocol format
-            if not fields or not tags_str or any(tag.split('=')[0] + '=' in fields for tag in tags):
-                skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid Line Protocol (tags={tags_str}, fields={fields}, raw_data={json.dumps(vehicle, indent=2)})")
+            parts = line.split(' ')
+            if len(parts) != 3 or not parts[0].startswith('mbta_vehicle,') or not fields or not tags_str:
+                skipped_vehicles.append(f"Vehicle {vehicle_id}: Invalid Line Protocol (line={line}, tags={tags_str}, fields={fields}, raw_data={json.dumps(vehicle, indent=2)})")
+                vehicles_failed += 1
+                continue
+            # Check for tag-like strings in fields
+            if any(tag.split('=')[0] in fields for tag in tags):
+                skipped_vehicles.append(f"Vehicle {vehicle_id}: Tag-field mixup detected (line={line}, tags={tags_str}, fields={fields}, raw_data={json.dumps(vehicle, indent=2)})")
                 vehicles_failed += 1
                 continue
             line_protocol_lines.append(line)
@@ -159,7 +165,7 @@ if skipped_vehicles:
 
 # If no valid lines, log run summary and exit
 if not line_protocol_lines:
-    print("✗ No valid data to write to InfluxDB")
+    print("✗ No valid vehicle data to write to InfluxDB")
     # Still write run summary
     summary_line = f"mbta_run_summary vehicles_attempted={vehicles_attempted}i,vehicles_passed={vehicles_passed}i,vehicles_failed={vehicles_failed}i {run_time}"
     line_protocol = summary_line
@@ -168,10 +174,11 @@ else:
     summary_line = f"mbta_run_summary vehicles_attempted={vehicles_attempted}i,vehicles_passed={vehicles_passed}i,vehicles_failed={vehicles_failed}i {run_time}"
     line_protocol = '\n'.join(line_protocol_lines + [summary_line])
 
-# Debug: Print Line Protocol for inspection (first 10 lines)
-print("Line Protocol (first 10 lines):")
+# Debug: Print Line Protocol for inspection (all vehicle lines + run summary)
+print("Line Protocol (all vehicle lines + run summary):")
 for line in line_protocol.split('\n')[:10]:
     print(line)
+print(f"Run Summary: {summary_line}")
 
 # 4. Write to InfluxDB Cloud
 write_url = f"{INFLUX_URL}/api/v2/write?org={INFLUX_ORG}&bucket={INFLUX_BUCKET}&precision=s"
