@@ -1,2 +1,4 @@
 .env
 .env-notes.md
+*.json
+.env-notes.sql
